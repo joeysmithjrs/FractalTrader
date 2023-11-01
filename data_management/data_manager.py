@@ -31,49 +31,55 @@ def _load_data(data_source, table_name=None):
     Load data from various sources into a DataFrame.
 
     Args:
-        data_source: Either a file path string, a DataFrame, a numpy array, or a list of lists.
-        table_name (optional): Required if data_source is a SQLite database file.
+        data_source (str/pd.DataFrame/np.ndarray/list): Data source to load from. It could be
+            a file path (CSV, Excel, SQLite), a DataFrame, a numpy array, or a list of lists.
+        table_name (str, optional): Name of the table to query from. Required if data_source is a SQLite database.
 
     Returns:
-        DataFrame with loaded data.
+        pd.DataFrame: DataFrame containing the loaded data.
 
     Raises:
-        ValueError: If an unsupported file format is provided or if there are issues with the data format.
+        ValueError: If the provided data source format is unsupported or issues arise during data loading.
     """
+    # Check if data_source is a string (path)
     if isinstance(data_source, str):
-        # Load data from a file
+        # Load from CSV file
         if data_source.endswith('.csv'):
             df = pd.read_csv(data_source, parse_dates=True, index_col=0)
+        # Load from Excel file
         elif data_source.endswith('.xlsx') or data_source.endswith('.xls'):
             df = pd.read_excel(data_source, parse_dates=True, index_col=0)
+        # Load from SQLite database
         elif data_source.endswith('.db'):
-            # Connect to SQLite database and fetch data
             conn = sqlite3.connect(data_source)
             df = pd.read_sql(f"SELECT * FROM {table_name}", conn, parse_dates=True, index_col=0)
             conn.close()
         else:
             raise ValueError("Unsupported file format!")
+    # Check if data_source is a DataFrame
     elif isinstance(data_source, pd.DataFrame):
-        # Ensure first column is a datetime index
         df = data_source.copy()
+        # Convert first column to datetime index, if not already
         if not isinstance(df.index, pd.DatetimeIndex):
             try:
                 df.set_index(pd.to_datetime(df.iloc[:, 0]), inplace=True)
                 df.drop(df.columns[0], axis=1, inplace=True)
             except:
                 raise ValueError("Error converting the first column to datetime!")
+    # Check if data_source is a numpy array
     elif isinstance(data_source, np.ndarray):
-        # Convert numpy array to DataFrame and ensure first column is a datetime index
         df = pd.DataFrame(data_source)
+        # Convert first column to datetime index
         try:
             df.set_index(pd.to_datetime(df.iloc[:, 0]), inplace=True)
             df.drop(df.columns[0], axis=1, inplace=True)
         except:
             raise ValueError("Error converting the first column to datetime!")
+    # Check if data_source is a list of lists
     elif isinstance(data_source, list):
-        # Convert list of lists to DataFrame and ensure first column is a datetime index
         if all(isinstance(i, list) for i in data_source):
             df = pd.DataFrame(data_source)
+            # Convert first column to datetime index
             try:
                 df.set_index(pd.to_datetime(df.iloc[:, 0]), inplace=True)
                 df.drop(df.columns[0], axis=1, inplace=True)
@@ -89,51 +95,84 @@ def _load_data(data_source, table_name=None):
 
 def _ohclv_tick_cols(df):
     """
-    Rename columns based on their type (OHLCV or TICK).
+    Rename the columns of a DataFrame based on the type of data (OHLCV or TICK).
 
     Args:
-        df: Input DataFrame.
+        df (pd.DataFrame): DataFrame with columns to rename.
 
     Returns:
-        DataFrame with renamed columns.
+        pd.DataFrame: DataFrame with renamed columns.
     """
+    # Define the default column names for OHLCV and TICK data types
     ohlcv_cols = ["open", "high", "low", "close", "volume", "open_interest"]
     tick_cols = ["price", "volume", "open_interest"]
 
-    # If there are 3 columns or fewer, assume it's tick data; otherwise, OHLCV
-    if df.shape[1] <= 3:
+    # Rename based on the number of columns present
+    if df.shape[1] <= 3:  # If 3 or fewer columns, assume it's tick data
         df.columns = tick_cols[:df.shape[1]]
-    else:
+    else:  # Assume OHLCV data
         df.columns = ohlcv_cols[:df.shape[1]]
     return df
 
 
-def _freq_to_timedelta(freq):
+def _infer_frequency(datetime_index):
     """
-    Convert a frequency string to its equivalent timedelta or offset.
+    Deduce the frequency of a datetime index.
 
     Args:
-        freq: Frequency string e.g., '5T', 'D', 'M'.
+        datetime_index (pd.DatetimeIndex): Index to infer frequency from.
 
     Returns:
-        Corresponding timedelta or offset object.
+        str: Inferred frequency.
 
     Raises:
-        ValueError: If the frequency is not directly convertible to a timedelta.
+        ValueError: If the frequency cannot be inferred.
     """
+    # Use pandas' built-in function to infer frequency first
+    freq = pd.infer_freq(datetime_index)
+    if freq:
+        return freq
+
+    # If unsuccessful, infer frequency from consistent time deltas in the data
+    diffs = datetime_index[1:] - datetime_index[:-1]
+    min_delta = diffs.min()
+    mask = (diffs == min_delta)[:-1] & (diffs[:-1] == diffs[1:])
+    pos = np.where(mask)[0]
+    if len(pos) > 0:  # At least one match found
+        freq = pd.infer_freq(datetime_index[pos[0]: pos[0] + 3])
+        if freq:
+            return freq
+
+    raise ValueError("Couldn't infer frequency from data! If you have provided tick data, ensure that "
+                     "is_tick_data=True upon instantiation.")
+
+
+def _freq_to_timedelta(freq):
+    """
+    Convert a frequency string to a corresponding timedelta or offset.
+
+    Args:
+        freq (str): Frequency string like '5T', 'D', 'M'.
+
+    Returns:
+        pd.Timedelta or pd.DateOffset: Corresponding timedelta or offset object.
+
+    Raises:
+        ValueError: If the frequency can't be converted to a timedelta.
+    """
+    # Tick data default
     if freq == "TICK":
-        # Defaults to 1 microsecond because tick data has no consistent time delta
         return pd.to_timedelta("1us")
 
-    # If freq doesn't start with a number and isn't a special case, prepend with '1'
+    # For certain frequencies without an initial number, prepend '1' as default
     if not freq[0].isdigit() and freq not in ["M", "Y", "Q", "B"]:
         freq = '1' + freq
 
-    # Default conversion using pandas to_timedelta
+    # Convert to timedelta using pandas
     try:
         return pd.to_timedelta(freq)
     except ValueError:
-        # Handle special cases for non-fixed duration timeframes
+        # Special handling for non-fixed duration frequencies
         if 'M' in freq:
             return pd.offsets.MonthEnd()
         elif 'Y' in freq:
@@ -146,7 +185,144 @@ def _freq_to_timedelta(freq):
             raise ValueError(f"The timeframe '{freq}' is not directly convertible to a timedelta.")
 
 
-class PricingSeries:
+class MultiFrame:
+    """
+    A class that represents multiple timeframes of a given dataset.
+
+    Attributes:
+        data: Dictionary holding data for different timeframes.
+        base_delta: The smallest time difference between data points.
+        base_timeframe: The smallest timeframe from which data is derived.
+        timeframes: List of all timeframes included in the data.
+        current_row: Current row of data.
+        current_date: Current date in consideration.
+        current_index: Index pointer for iteration purposes.
+    """
+
+    def __init__(self):
+        """
+        Initialize the MultiFrame with default values.
+        """
+        self.data = {}
+        self.base_delta = None
+        self.base_timeframe = None
+        self.timeframes = None
+        self.current_row = None
+        self.current_date = None
+        self.current_index = -1
+
+    def __iter__(self):
+        """
+        Initialize the iterator.
+
+        Returns:
+            Self.
+        """
+        return self
+
+    def _closest_valid_index(self, timeframe):
+        """
+        Return the closest valid index for a higher timeframe based on the current date.
+
+        Args:
+            timeframe: The higher timeframe to consider.
+
+        Returns:
+            Closest valid datetime index for the given timeframe.
+        """
+        tf_dates = self.data[timeframe].index
+        # Find the closest date index in the timeframe's dates to the current date
+        closest_index_position = tf_dates.get_indexer([self.current_date], method='nearest')[0]
+        closest_index_date = tf_dates[closest_index_position]
+
+        # Check the proximity of the closest date to the current date
+        if closest_index_date <= self.current_date:
+            if (self.current_date - closest_index_date) == self.base_delta:
+                if closest_index_position < len(tf_dates) - 1:
+                    next_index_date = tf_dates[closest_index_position + 1]
+                    if (next_index_date - self.current_date) == self.base_delta:
+                        return_index_position = closest_index_position
+            return_index_position = closest_index_position - 1
+        else:
+            # Logic for when closest_index_date is greater than the current_date
+            if (closest_index_date - self.current_date) == self.base_delta:
+                return_index_position = closest_index_position - 1
+            else:
+                return_index_position = closest_index_position - 2
+
+        # Return the found index or None if it's out of bounds
+        if return_index_position < 0:
+            return None
+        else:
+            return tf_dates[return_index_position]
+
+    def get(self, column, timeframe, n=0, future=False):
+        """
+        Get data from the specified column and timeframe.
+
+        Args:
+            column: Column name.
+            timeframe: The timeframe to retrieve data from.
+            n: Number of periods to retrieve.
+            future: If future data is to be considered.
+
+        Returns:
+            Value or list of values from the specified column and timeframe.
+        """
+        # Validate inputs
+        if timeframe not in self.timeframes:
+            raise ValueError(f"Timeframe {timeframe} not in loaded data!")
+        if column not in self.data[timeframe].columns:
+            raise ValueError(f"Column {column} not in loaded data for timeframe {timeframe}!")
+
+        # If no periods are specified, return the current value
+        if n == 0:
+            if timeframe == self.base_timeframe:
+                return self.data[timeframe].iloc[self.current_index][column]
+            else:
+                closest_valid_date = self._closest_valid_index(timeframe)
+                if closest_valid_date is None:
+                    return None
+                return self.data[timeframe].loc[closest_valid_date][column]
+
+        # Handle retrieval from the base timeframe
+        if timeframe == self.base_timeframe:
+            if future:
+                target_idx = self.current_index
+                end_idx = target_idx + n
+            else:
+                target_idx = self.current_index - n
+                end_idx = self.current_index + 1
+
+            # Ensure index boundaries are not exceeded
+            target_idx = max(0, target_idx)
+            end_idx = min(len(self.data[timeframe]), end_idx)
+
+            return list(self.data[timeframe].iloc[target_idx:end_idx][column])
+
+        # Handle retrieval from higher timeframes
+        closest_valid_date = self._closest_valid_index(timeframe)
+        if closest_valid_date is None:
+            return None
+
+        if future:
+            valid_dates = self.data[timeframe].index[self.data[timeframe].index >= closest_valid_date]
+        else:
+            valid_dates = self.data[timeframe].index[self.data[timeframe].index <= closest_valid_date]
+
+        # Find the start and end indices to retrieve data
+        end_idx = valid_dates.get_loc(valid_dates[-1])
+        start_idx = end_idx - n + 1 if not future else end_idx
+        end_idx = start_idx + n
+
+        # Ensure index boundaries are not exceeded
+        start_idx = max(0, start_idx)
+        end_idx = min(len(self.data[timeframe]), end_idx)
+
+        return list(self.data[timeframe].iloc[start_idx:end_idx][column])
+
+
+class PricingSeries(MultiFrame):
     """
     A class that represents a series of pricing data for one or multiple timeframes.
 
@@ -171,17 +347,25 @@ class PricingSeries:
             is_tick_data: If the provided data is tick data.
             table_name: Name of the table in case data_source is a database.
         """
+        super().__init__()  # Call the initialization method of the parent class (MultiFrame)
+
+        # Load data and infer important characteristics
         self.raw_data = _ohclv_tick_cols(_load_data(data_source, table_name))
         self.symbol = symbol
         self.is_tick_data = is_tick_data
-        self.base_timeframe = self._infer_frequency(self.raw_data.index)
+        self.base_timeframe = _infer_frequency(self.raw_data.index) if not self.is_tick_data else "TICK"
         self.base_delta = _freq_to_timedelta(self.base_timeframe)
+
+        # Convert all timeframes to time deltas and filter out invalid ones
         timeframes_td = [_freq_to_timedelta(tf) for tf in timeframes or []]
         self.timeframes = [self.base_timeframe] + [tf for tf, tf_td in zip(timeframes or [], timeframes_td) if
                                                    tf_td >= self.base_delta and tf != self.base_timeframe]
+
+        # Initialize a dictionary to track how many bars since the last new data point for each timeframe
+        self.bars_since_new = {tf: 0 for tf in self.timeframes}
+
+        # Perform initial data resampling
         self.data = self._resample_data()
-        self.current_row, self.current_date = None, None
-        self.current_index = -1
 
     def _resample_data(self):
         """
@@ -197,7 +381,8 @@ class PricingSeries:
                 resampled[tf] = self.raw_data.copy()
                 continue
             if self.is_tick_data:
-                # Tick data resampling logic
+                # For tick data, resampling requires different logic
+
                 agg_dict = {
                     'price': ['first', 'max', 'min', 'last']
                 }
@@ -206,9 +391,10 @@ class PricingSeries:
                 if 'open_interest' in self.raw_data.columns:
                     agg_dict['open_interest'] = 'last'
 
+                # Resample tick data
                 temp_resampled = self.raw_data.resample(tf, closed='left', label='left').agg(agg_dict).dropna()
 
-                # Map multi-index columns to standard OHLCV format
+                # Rename columns to OHLCV format
                 column_mapping = {
                     ('price', 'first'): 'open',
                     ('price', 'max'): 'high',
@@ -223,7 +409,7 @@ class PricingSeries:
                 temp_resampled.columns = pd.MultiIndex.from_tuples(temp_resampled.columns).map(column_mapping)
                 resampled[tf] = temp_resampled
             else:
-                # Resampling logic for regular data
+                # For standard data, resampling follows a standard logic
                 agg_dict = {'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last'}
                 if 'volume' in self.raw_data.columns:
                     agg_dict['volume'] = 'sum'
@@ -234,42 +420,18 @@ class PricingSeries:
 
         return resampled
 
-    def _infer_frequency(self, datetime_index):
+    def new_bar_open(self, timeframe):
         """
-        Infer the frequency of the given datetime index.
+        Check if a new bar has opened for a given timeframe.
 
         Args:
-            datetime_index: Datetime index to infer frequency from.
+            timeframe: The timeframe in question.
 
         Returns:
-            Inferred frequency as a string.
+            Boolean indicating if a new bar has opened.
         """
-        if self.is_tick_data:
-            return "TICK"  # No fixed frequency for tick data
-        # Try to infer using pandas first
-        freq = pd.infer_freq(datetime_index)
-        if freq:
-            return freq
-        # If the data is too incomplete, we use pd.infer_freq on a small chunk
-        diffs = datetime_index[1:] - datetime_index[:-1]
-        min_delta = diffs.min()
-        mask = (diffs == min_delta)[:-1] & (diffs[:-1] == diffs[1:])
-        pos = np.where(mask)[0]
-        if len(pos) > 0:  # If we found at least one match
-            inferred_freq = pd.infer_freq(datetime_index[pos[0]: pos[0] + 3])
-            if inferred_freq:
-                return inferred_freq
-        raise ValueError("Couldn't infer frequency from data! If you have provided tick data, ensure that "
-                         "is_tick_data=True upon instantiation.")
-
-    def __iter__(self):
-        """
-        Initialize the iterator.
-
-        Returns:
-            Self.
-        """
-        return self
+        # Compare current open with the previous open to determine if a new bar has opened
+        return self.get('open', timeframe) != self.get('open', timeframe, n=1)
 
     def __next__(self):
         """
@@ -281,6 +443,8 @@ class PricingSeries:
         if self.current_index < len(self.raw_data) - 1:
             self.current_index += 1
             self.current_date = self.raw_data.index[self.current_index]
+
+            # Populate the current row with data from all timeframes and columns
             self.current_row = {
                 timeframe: {
                     column: self.get(column, timeframe)
@@ -289,104 +453,23 @@ class PricingSeries:
                 for timeframe in self.timeframes
             }
         else:
+            # If there's no more data, end the iteration
             raise StopIteration
 
-    def _closest_valid_index(self, current_date, timeframe):
-        """
-        Return the closest valid index for a higher timeframe.
 
-        Args:
-            current_date: The current date in consideration.
-            timeframe: The higher timeframe.
+class AlternativeSeries(MultiFrame):
+    def __init__(self, data_source, pricing_series, agg_dict=None):
+        super().__init__()
+        self.raw_data = [_load_data(x) for x in data_source] if isinstance(data_source, list) else [_load_data(data_source)]
+        self.timeframes = pricing_series.timeframes
+        self.agg_dict = agg_dict
+        self.base_delta = pricing_series.base_delta
+        self.base_timeframe = pricing_series.base_timeframe
+        self.alt_timeframe = [_infer_frequency(x.index) for x in self.raw_data]
+        self.alt_delta = [_freq_to_timedelta(x) for x in self.alt_timeframe]
 
-        Returns:
-            Closest valid datetime index for the given timeframe.
-        """
-        tf_dates = self.data[timeframe].index
-        closest_index_position = tf_dates.get_indexer([current_date], method='nearest')[0]
-        closest_index_date = tf_dates[closest_index_position]
+    def _resample_data(self):
+        pass
 
-        if closest_index_date <= current_date:
-            # Condition to check if both differences are equal to base_delta
-            if (current_date - closest_index_date) == self.base_delta:
-                if closest_index_position < len(tf_dates) - 1:
-                    next_index_date = tf_dates[closest_index_position + 1]
-                    if (next_index_date - current_date) == self.base_delta:
-                        return_index_position = closest_index_position
-            return_index_position = closest_index_position - 1
-        else:
-            # Logic for when closest_index_date is more than the current_date
-            if (closest_index_date - current_date) == self.base_delta:
-                return_index_position = closest_index_position - 1
-            else:
-                return_index_position = closest_index_position - 2
-        if return_index_position < 0:
-            return None
-        else:
-            return tf_dates[return_index_position]
-
-    def get(self, column, timeframe, n=0, future=False):
-        """
-        Get data from the specified column and timeframe.
-
-        Args:
-            column: Column name.
-            timeframe: The timeframe.
-            n: Number of periods to retrieve.
-            future: If data from future is required.
-
-        Returns:
-            Value or list of values from the specified column and timeframe.
-        """
-        current_date = self.data[self.base_timeframe].index[self.current_index]
-        if timeframe not in self.timeframes:
-            raise ValueError(f"Timeframe {timeframe} not in loaded data!")
-
-        if column not in self.data[timeframe].columns:
-            raise ValueError(f"Column {column} not in loaded data for timeframe {timeframe}!")
-
-        # If n=0, return the current value
-        if n == 0:
-            if timeframe == self.base_timeframe:
-                return self.data[timeframe].iloc[self.current_index][column]
-            else:
-                closest_valid_date = self._closest_valid_index(current_date, timeframe)
-                if closest_valid_date is None:
-                    return None
-                return self.data[timeframe].loc[closest_valid_date][column]
-
-        # If it's the base timeframe
-        if timeframe == self.base_timeframe:
-            if future:
-                target_idx = self.current_index
-                end_idx = target_idx + n
-            else:
-                target_idx = self.current_index - n
-                end_idx = self.current_index + 1
-            # Ensure bounds
-            target_idx = max(0, target_idx)
-            end_idx = min(len(self.data[timeframe]), end_idx)
-
-            return list(self.data[timeframe].iloc[target_idx:end_idx][column])
-
-        # If it's a higher timeframe
-        closest_valid_date = self._closest_valid_index(current_date, timeframe)
-        if closest_valid_date is None:
-            return None
-
-        if future:
-            valid_dates = self.data[timeframe].index[
-                self.data[timeframe].index >= closest_valid_date]
-        else:
-            valid_dates = self.data[timeframe].index[
-                self.data[timeframe].index <= closest_valid_date]
-
-        end_idx = valid_dates.get_loc(valid_dates[-1])
-        start_idx = end_idx - n + 1 if not future else end_idx
-        end_idx = start_idx + n
-
-        # Ensure bounds
-        start_idx = max(0, start_idx)
-        end_idx = min(len(self.data[timeframe]), end_idx)
-
-        return list(self.data[timeframe].iloc[start_idx:end_idx][column])
+    def __next__(self):
+        pass

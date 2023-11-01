@@ -29,22 +29,39 @@ from data_management.data_manager import PricingSeries
 
 
 def _freq_to_offset(freq):
-    """Map frequency string to its equivalent DateOffset."""
+    """
+    Convert frequency string to its equivalent DateOffset.
+
+    Args:
+        freq (str): Frequency string (e.g. 'D', 'H', 'M', ...).
+
+    Returns:
+        DateOffset: Corresponding pandas DateOffset object.
+
+    Raises:
+        ValueError: If the provided frequency is unsupported.
+    """
+    # Define mapping of frequency strings to DateOffset objects.
     mapping = {
         'D': pd.DateOffset(days=1),
         'H': pd.DateOffset(hours=1),
-        'T': pd.DateOffset(minutes=1),  # or 'min'
+        # 'T' and 'min' are equivalent for minutes
+        'T': pd.DateOffset(minutes=1),
         'S': pd.DateOffset(seconds=1),
-        'L': pd.DateOffset(milliseconds=1),  # or 'ms'
+        # 'L' and 'ms' are equivalent for milliseconds
+        'L': pd.DateOffset(milliseconds=1),
         'U': pd.DateOffset(microseconds=1),
         'M': pd.DateOffset(months=1),
         'Y': pd.DateOffset(years=1),
         'Q': pd.DateOffset(months=3),
-        'B': pd.DateOffset(weeks=1),  # Business day, it's similar to 'W'
+        # Business day, equivalent to 'W'
+        'B': pd.DateOffset(weeks=1),
         'W': pd.DateOffset(weeks=1),
-        'A': pd.DateOffset(years=1),  # Annual frequency, same as 'Y'
+        # Annual frequency, same as 'Y'
+        'A': pd.DateOffset(years=1),
     }
 
+    # Check if freq is in the mapping keys. If not, raise an error.
     if freq not in mapping:
         raise ValueError(f"Unsupported frequency: {freq}")
 
@@ -52,10 +69,20 @@ def _freq_to_offset(freq):
 
 
 def _start_of_period(date, freq):
-    """Roll back the given date to the start of the period based on the given frequency."""
+    """
+    Roll back the given date to the start of the period based on the given frequency.
+
+    Args:
+        date (Timestamp): The input date.
+        freq (str): Frequency string (e.g. 'D', 'H', 'M', ...).
+
+    Returns:
+        Timestamp: Date adjusted to the start of the period.
+    """
     offset = _freq_to_offset(freq)
     rolled_date = date - offset
 
+    # Keep rolling the date back until it reaches the start of the period.
     while (date.to_period(freq) - rolled_date.to_period(freq)).n < 1:
         date = rolled_date
         rolled_date -= offset
@@ -64,22 +91,43 @@ def _start_of_period(date, freq):
 
 
 def generate_data(data_type='OHLCV', freq='D', samples=252, ticks_per_sample=10, business_hours=True, start_date=None):
-    # Adjust the end_date to the start of the period based on frequency.
+    """
+    Generate financial data (OHLCV or tick data) based on input parameters.
+
+    Args:
+        data_type (str): Type of data to generate. Options are 'OHLCV' or 'tick'. Default is 'OHLCV'.
+        freq (str): Frequency string (e.g. 'D', 'H', 'M', ...). Default is 'D'.
+        samples (int): Number of data samples to generate. Default is 252.
+        ticks_per_sample (int): Number of tick data points per sample. Used if data_type is 'tick'. Default is 10.
+        business_hours (bool): Whether to consider only business hours for generating data. Default is True.
+        start_date (Timestamp, optional): Starting date for the data generation. Default is the start of the current year.
+
+    Returns:
+        DataFrame: Pandas DataFrame with generated data.
+
+    Raises:
+        ValueError: If the provided data_type is neither 'OHLCV' nor 'tick'.
+    """
+    # If start_date isn't provided, default to the beginning of the current year.
     if start_date is None:
         start_date = pd.Timestamp.now().replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
     end_date = start_date + _freq_to_offset(freq) * samples
 
+    # Generate OHLCV data.
     if data_type == 'OHLCV':
         idx = pd.date_range(end=end_date, periods=samples, freq=freq)
+        # If business_hours is True, consider only weekdays.
         if business_hours:
-            idx = idx[idx.weekday < 5]  # Only consider weekdays for business hours
+            idx = idx[idx.weekday < 5]
 
+        # Simulate close, open, high, low, and volume data.
         close = 100 + np.cumsum(np.random.randn(len(idx)) * 0.5)
         open_ = close + np.random.randn(len(idx)) * 0.5
         high = close + np.random.rand(len(idx)) * 0.5
         low = close - np.random.rand(len(idx)) * 0.5
         volume = np.random.randint(5000, 10000, size=len(idx))
 
+        # Create the OHLCV DataFrame.
         df = pd.DataFrame({
             'open': open_,
             'high': high,
@@ -88,13 +136,17 @@ def generate_data(data_type='OHLCV', freq='D', samples=252, ticks_per_sample=10,
             'volume': volume
         }, index=idx)
 
+    # Generate tick data.
     elif data_type == 'tick':
         base_idx = pd.date_range(end=end_date, periods=samples, freq=freq)
+        # If business_hours is True, consider only weekdays.
         if business_hours:
-            base_idx = base_idx[base_idx.weekday < 5]  # Only consider weekdays for business hours
+            base_idx = base_idx[base_idx.weekday < 5]
 
+        # Simulate ticks for each sample in base_idx.
         all_ticks = []
         for base_time in base_idx:
+            # Define market hours if business_hours is True.
             if business_hours:
                 start_time = base_time + pd.Timedelta(hours=9, minutes=30)  # Market open
                 end_time = base_time + pd.Timedelta(hours=16)  # Market close
@@ -102,6 +154,7 @@ def generate_data(data_type='OHLCV', freq='D', samples=252, ticks_per_sample=10,
                 start_time = base_time
                 end_time = base_time + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)  # Just before the next day starts
 
+            # Simulate tick data points within the defined time range.
             for _ in range(ticks_per_sample):
                 tick_time = np.random.uniform(start_time.value, end_time.value)
                 tick_time = pd.Timestamp(tick_time)
@@ -109,9 +162,11 @@ def generate_data(data_type='OHLCV', freq='D', samples=252, ticks_per_sample=10,
 
         idx = pd.DatetimeIndex(sorted(all_ticks))
 
+        # Simulate price and volume data for tick data.
         prices = 100 + np.cumsum(np.random.randn(len(idx)) * 0.1)
         volume = np.random.randint(50, 200, size=len(idx))
 
+        # Create the tick DataFrame.
         df = pd.DataFrame({
             'price': prices,
             'volume': volume
