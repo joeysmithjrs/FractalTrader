@@ -90,6 +90,7 @@ def _load_data(data_source, table_name=None):
     else:
         raise ValueError("data_source should be a path to a csv/excel/sqlite database, a pandas DataFrame, "
                          "a numpy array, or a list of lists!")
+    df.dropna(inplace=True)
     return df
 
 
@@ -420,7 +421,7 @@ class PricingSeries(MultiFrame):
 
         return resampled
 
-    def new_bar_open(self, timeframe):
+    def new_bar_open(self, timeframe=None):
         """
         Check if a new bar has opened for a given timeframe.
 
@@ -431,6 +432,8 @@ class PricingSeries(MultiFrame):
             Boolean indicating if a new bar has opened.
         """
         # Compare current open with the previous open to determine if a new bar has opened
+        if timeframe is None:
+            return self.get('open', self.base_timeframe) != self.get('open', self.base_timeframe, n=1)
         return self.get('open', timeframe) != self.get('open', timeframe, n=1)
 
     def __next__(self):
@@ -458,18 +461,51 @@ class PricingSeries(MultiFrame):
 
 
 class AlternativeSeries(MultiFrame):
-    def __init__(self, data_source, pricing_series, agg_dict=None):
+    def __init__(self, data_source, agg_dict=None, res_tf=None):
         super().__init__()
-        self.raw_data = [_load_data(x) for x in data_source] if isinstance(data_source, list) else [_load_data(data_source)]
-        self.timeframes = pricing_series.timeframes
-        self.agg_dict = agg_dict
-        self.base_delta = pricing_series.base_delta
-        self.base_timeframe = pricing_series.base_timeframe
-        self.alt_timeframe = [_infer_frequency(x.index) for x in self.raw_data]
-        self.alt_delta = [_freq_to_timedelta(x) for x in self.alt_timeframe]
+        self.raw_data = _load_data(data_source)
+        self.alt_timeframe = _infer_frequency(self.raw_data.index)
+        self.alt_delta = _freq_to_timedelta(self.alt_timeframe)
+        self.agg_dict = agg_dict if agg_dict else {col: 'last' for col in self.raw_data.columns}
+        self.res_tf = self.base_timeframe if not res_tf else res_tf
+        self.timeframes, self.base_delta, self.base_timeframe, self.base_index, self.data = None, None, None, None, None
+
+    def add_context(self, pricing_series_timeframes, pricing_series_base_delta, pricing_series_base_timeframe, pricing_series_index):
+        self.timeframes = pricing_series_timeframes
+        self.base_delta = pricing_series_base_delta
+        self.base_timeframe = pricing_series_base_timeframe
+        self.base_index = pricing_series_index
+        self.data = self._resample_data()
 
     def _resample_data(self):
-        pass
-
+        resampled = self.raw_data.resample(self.res_tf, closed='left', label='left').agg(self.agg_dict).dropna()
+        return resampled.reindex(self.pricing_series_index, method='ffill')
+        
     def __next__(self):
         pass
+
+class SingletonMeta(type):
+    _instances = {}
+
+    def __call__(cls, *args, **kwargs):
+        if cls not in cls._instances:
+            cls._instances[cls] = super().__call__(*args, **kwargs)
+        return cls._instances[cls]
+
+class DataFeed(metaclass=SingletonMeta):
+
+    def __init__(self):
+        # Initialization for DataFeed
+        pass
+
+class HistoricalDataFeed(DataFeed):
+
+    def __init__(self):
+        super().__init__()
+        self.stream = dict()
+
+    def add(self, data):
+        if isinstance(data, PricingSeries):
+            # Implementation for adding a PricingSeries
+            pass
+
