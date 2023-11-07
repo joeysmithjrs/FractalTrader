@@ -21,3 +21,20 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
+
+from abc import ABC, abstractmethod
+class Strategy(ABC):
+
+    def __init__(self, configs, risk_management=None):
+        self.configs = configs
+        self.risk_management = risk_management
+        pass
+
+    def onClose(self, *args, **kwargs):
+        pass
+
+
+class MetaStrategy:
+
+    def __init__(self):
+        pass

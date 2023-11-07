@@ -21,3 +21,28 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
+
+class Signal:
+
+    def __init__(self):
+        pass
+
+    def __iter__(self):
+        return self
+
+class Indicator(Signal):
+
+    def __init__(self):
+        pass
+
+    def __next__(self):
+        pass
+
+
+class Predictor(Signal):
+
+    def __init__(self):
+        pass
+
+    def __next__(self):
+        pass

@@ -211,7 +211,8 @@ class MultiFrame:
         self.current_row = None
         self.current_date = None
         self.current_index = -1
-
+        self.tf_date_bounds = {tf:(0, 3) for tf in self.timeframes}
+        
     def __iter__(self):
         """
         Initialize the iterator.
@@ -484,15 +485,7 @@ class AlternativeSeries(MultiFrame):
     def __next__(self):
         pass
 
-class SingletonMeta(type):
-    _instances = {}
-
-    def __call__(cls, *args, **kwargs):
-        if cls not in cls._instances:
-            cls._instances[cls] = super().__call__(*args, **kwargs)
-        return cls._instances[cls]
-
-class DataFeed(metaclass=SingletonMeta):
+class DataFeed():
 
     def __init__(self):
         # Initialization for DataFeed
@@ -508,4 +501,6 @@ class HistoricalDataFeed(DataFeed):
         if isinstance(data, PricingSeries):
             # Implementation for adding a PricingSeries
             pass
-
+        if isinstance(data, AlternativeSeries):
+            # Implementation for adding a Alternative
+            pass

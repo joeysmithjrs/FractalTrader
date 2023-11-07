@@ -21,3 +21,19 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
+
+from data_manager import MultiFrame
+class LiveDataParser():
+
+    def __init__(self):
+        pass
+
+class LivePricingSeries(MultiFrame):
+        
+    def __init__(self):
+        pass
+
+class LiveAlternativeSeries(MultiFrame):
+        
+    def __init__(self):
+        pass
