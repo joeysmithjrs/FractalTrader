@@ -25,31 +25,65 @@ from abc import ABC, abstractmethod
 
 class RiskManager(ABC):
 
-    def __init__(self, max_drawdown, max_holding_period):
+    def __init__(self, max_drawdown = 1, max_holding_period_bars = 100):
         self.max_drawdown = max_drawdown
-        self.max_holding_period = max_holding_period
+        self.max_holding_period = max_holding_period_bars
+
+    @abstractmethod
+    def calculate(self, *args, **kwargs):
+        pass
+    
+    @abstractmethod
+    def stop_loss(self, *args, **kwargs):
+        pass
+
+    @abstractmethod
+    def take_profit(self, *args, **kwargs):
+        pass
+
+
+class PositionSizer(ABC):
+
+    def __init__(self):
+        pass 
 
     @abstractmethod
     def position_size(self, *args, **kwargs):
         pass
 
-class KellyCriterion(RiskManager):
 
-    def __init__(self):
-        pass
+class KellyCriterion(PositionSizer):
 
-    def postion_size(self, win_probability, win_loss_ratio):
+    def __init__(self, win_probability = 0.5, win_loss_ratio = 0.5):
+        super().__init__()
+        self.win_probability = win_probability
+        self.win_loss_ratio = win_loss_ratio
+
+    def update_probs(self, win_probability, win_loss_ratio):
+        self.win_probability = win_probability
+        self.win_loss_ratio = win_loss_ratio
+
+    def postion_size(self):
         """
         Calculate the Kelly Criterion position size.
 
-        :param win_probability: The probability of a winning trade.
-        :param win_loss_ratio: The ratio of the average win to the average loss.
         :return: The recommended position size as a fraction of the portfolio.
         """
         # Kelly Criterion formula: f = p - (1 - p) / b
         # where:
-        # f is the fraction of the current bankroll to wager;
-        # p is the probability of a win;
+        # f is the fraction of the current bankroll to wager
+        # p is the probability of a win
         # b is the odds received on the wager (b to 1); for money management, we use the win/loss ratio.
-        kelly_fraction = win_probability - ((1 - win_probability) / win_loss_ratio)
+        kelly_fraction = self.win_probability - ((1 - self.win_probability) / self.win_loss_ratio)
         return max(0, kelly_fraction)  # Do not bet if the fraction is negative
+    
+
+class FixedPercent(PositionSizer):
+
+    def __init__(self, percent):
+        super().__init__()
+        self.percent = percent
+
+    def position_size(self, price):
+        return price 
+

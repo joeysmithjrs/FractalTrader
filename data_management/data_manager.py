@@ -211,7 +211,8 @@ class MultiFrame:
         self.current_row = None
         self.current_date = None
         self.current_index = -1
-        self.tf_date_bounds = {tf:(0, 3) for tf in self.timeframes}
+        self.tf_date_bounds = {tf : (0, 3) for tf in self.timeframes}
+        self.tf_date_change = {tf : None for tf in self.timeframes}
         
     def __iter__(self):
         """
@@ -232,7 +233,7 @@ class MultiFrame:
         Returns:
             Closest valid datetime index for the given timeframe.
         """
-        tf_dates = self.data[timeframe].index
+        tf_dates = self.data[timeframe].index[self.tf_date_bounds[timeframe][0], self.tf_date_bounds[timeframe][1]]
         # Find the closest date index in the timeframe's dates to the current date
         closest_index_position = tf_dates.get_indexer([self.current_date], method='nearest')[0]
         closest_index_date = tf_dates[closest_index_position]
@@ -285,6 +286,10 @@ class MultiFrame:
                 closest_valid_date = self._closest_valid_index(timeframe)
                 if closest_valid_date is None:
                     return None
+                if closest_valid_date != self.tf_date_change[timeframe]:
+                    self.tf_date_bounds[timeframe][0] += 1
+                    self.tf_date_bounds[timeframe][1] += 1
+                    self.tf_date_change[timeframe] = closest_valid_date
                 return self.data[timeframe].loc[closest_valid_date][column]
 
         # Handle retrieval from the base timeframe
@@ -306,6 +311,10 @@ class MultiFrame:
         closest_valid_date = self._closest_valid_index(timeframe)
         if closest_valid_date is None:
             return None
+        if closest_valid_date != self.tf_date_change[timeframe]:
+            self.tf_date_bounds[timeframe][0] += 1
+            self.tf_date_bounds[timeframe][1] += 1
+            self.tf_date_change[timeframe] = closest_valid_date
 
         if future:
             valid_dates = self.data[timeframe].index[self.data[timeframe].index >= closest_valid_date]
