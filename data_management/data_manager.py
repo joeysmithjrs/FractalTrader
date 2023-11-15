@@ -335,6 +335,30 @@ class MultiFrame:
         end_idx = min(len(self.data[timeframe]), end_idx)
 
         return list(self.data[timeframe].iloc[start_idx:end_idx][column])
+    
+    def __next__(self):
+        """
+        Move to the next data point in the series by updating current_date and current_row.
+
+        Raises:
+            StopIteration if the end of the data is reached.
+        """
+        if self.current_index < len(self.data[self.base_timeframe].index) - 1:
+            self.current_index += 1
+            self.current_date = self.data[self.base_timeframe].index[self.current_index]
+
+            # Populate the current row with data from all timeframes and columns
+            self.current_row = {
+                timeframe: {
+                    column: self.get(column, timeframe)
+                    for column in self.data[timeframe].columns
+                }
+                for timeframe in self.timeframes
+            }
+        else:
+            # If there's no more data, end the iteration
+            raise StopIteration
+
 
 
 class PricingSeries(MultiFrame):
@@ -449,45 +473,19 @@ class PricingSeries(MultiFrame):
             return self.tf_date_change[self.base_timeframe][1] == 0
         return self.tf_date_change[timeframe][1] == 0
 
-    def __next__(self):
-        """
-        Move to the next data point in the series by updating current_date and current_row.
-
-        Raises:
-            StopIteration if the end of the data is reached.
-        """
-        if self.current_index < len(self.raw_data) - 1:
-            self.current_index += 1
-            self.current_date = self.raw_data.index[self.current_index]
-
-            # Populate the current row with data from all timeframes and columns
-            self.current_row = {
-                timeframe: {
-                    column: self.get(column, timeframe)
-                    for column in self.data[timeframe].columns
-                }
-                for timeframe in self.timeframes
-            }
-        else:
-            # If there's no more data, end the iteration
-            raise StopIteration
-
 
 class AlternativeSeries(MultiFrame):
-    def __init__(self, data_source, agg_dict=None, res_tf=None):
+    def __init__(self, data_source, pricing_series, agg_dict=None, res_tf=None):
         super().__init__()
         self.raw_data = _load_data(data_source)
         self.alt_timeframe = _infer_frequency(self.raw_data.index)
         self.alt_delta = _freq_to_timedelta(self.alt_timeframe)
         self.agg_dict = agg_dict if agg_dict else {col: 'last' for col in self.raw_data.columns}
         self.res_tf = self.base_timeframe if not res_tf else res_tf
-        self.timeframes, self.base_delta, self.base_timeframe, self.base_index, self.data = None, None, None, None, None
-
-    def add_context(self, pricing_series_timeframes, pricing_series_base_delta, pricing_series_base_timeframe, pricing_series_index):
-        self.timeframes = pricing_series_timeframes
-        self.base_delta = pricing_series_base_delta
-        self.base_timeframe = pricing_series_base_timeframe
-        self.base_index = pricing_series_index
+        self.timeframes = pricing_series.timeframes
+        self.base_delta = pricing_series.base_delta
+        self.base_timeframe = pricing_series.base_timeframe
+        self.base_index = pricing_series.data[self.base_timeframe].index
         self.data = self._resample_data()
 
     def _resample_data(self):
@@ -506,23 +504,26 @@ class DataFeed():
 
     def __init__(self, live=False):
         self.live = live
-        self.pricing_feeds = {}
-        self.alternative_feeds = {}
+        self.multiframes = {}
         self.signals = {}
 
     def __iter__(self):
         return self
 
     def add_series(self, data, name):
-        if isinstance(data, PricingSeries):
-            self.pricing_feeds[name] = data
-        elif isinstance(data, AlternativeSeries):
-            self.alternative_feeds[name] = data
+        if isinstance(data, MultiFrame):
+            self.multiframes[name] = data
         else:
             raise TypeError(f"Expected PricingSeries or AlternativeSeries, got {type(data).__name__}")
 
     def add_signal(self, signal, configs):
         self.signals[signal] = [(i.pricing_series, i.timeframe) for i in configs]
 
-    def __next__():
+    def __next__(self):
+        for _, val in self.multiframes:
+            val.next()
+
+    def get(self, name, timeframe, n):
+        return 
+
         
