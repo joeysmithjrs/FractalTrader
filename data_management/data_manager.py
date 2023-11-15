@@ -212,7 +212,7 @@ class MultiFrame:
         self.current_date = None
         self.current_index = -1
         self.tf_date_bounds = {tf : (0, 3) for tf in self.timeframes}
-        self.tf_date_change = {tf : None for tf in self.timeframes}
+        self.tf_date_change = {tf : (None, -1) for tf in self.timeframes}
         
     def __iter__(self):
         """
@@ -289,7 +289,10 @@ class MultiFrame:
                 if closest_valid_date != self.tf_date_change[timeframe]:
                     self.tf_date_bounds[timeframe][0] += 1
                     self.tf_date_bounds[timeframe][1] += 1
-                    self.tf_date_change[timeframe] = closest_valid_date
+                    self.tf_date_change[timeframe][0] = closest_valid_date
+                    self.tf_date_change[timeframe][1] = 0
+                else:
+                    self.tf_date_change[timeframe][1] += 1
                 return self.data[timeframe].loc[closest_valid_date][column]
 
         # Handle retrieval from the base timeframe
@@ -314,8 +317,9 @@ class MultiFrame:
         if closest_valid_date != self.tf_date_change[timeframe]:
             self.tf_date_bounds[timeframe][0] += 1
             self.tf_date_bounds[timeframe][1] += 1
-            self.tf_date_change[timeframe] = closest_valid_date
-
+            self.tf_date_change[timeframe][0] = closest_valid_date
+        else:
+            self.tf_date_change[timeframe][1] += 1
         if future:
             valid_dates = self.data[timeframe].index[self.data[timeframe].index >= closest_valid_date]
         else:
@@ -441,10 +445,9 @@ class PricingSeries(MultiFrame):
         Returns:
             Boolean indicating if a new bar has opened.
         """
-        # Compare current open with the previous open to determine if a new bar has opened
         if timeframe is None:
-            return self.get('open', self.base_timeframe) != self.get('open', self.base_timeframe, n=1)
-        return self.get('open', timeframe) != self.get('open', timeframe, n=1)
+            return self.tf_date_change[self.base_timeframe][1] == 0
+        return self.tf_date_change[timeframe][1] == 0
 
     def __next__(self):
         """
@@ -490,26 +493,36 @@ class AlternativeSeries(MultiFrame):
     def _resample_data(self):
         resampled = self.raw_data.resample(self.res_tf, closed='left', label='left').agg(self.agg_dict).dropna()
         return resampled.reindex(self.pricing_series_index, method='ffill')
+    
+    def is_new_entry(self, timeframe=None):
+        if timeframe is None:
+            return self.tf_date_change[self.base_timeframe][1] == 0
+        return self.tf_date_change[timeframe][1] == 0
         
     def __next__(self):
         pass
 
 class DataFeed():
 
-    def __init__(self):
-        # Initialization for DataFeed
-        pass
+    def __init__(self, live=False):
+        self.live = live
+        self.pricing_feeds = {}
+        self.alternative_feeds = {}
+        self.signals = {}
 
-class HistoricalDataFeed(DataFeed):
+    def __iter__(self):
+        return self
 
-    def __init__(self):
-        super().__init__()
-        self.stream = dict()
-
-    def add(self, data):
+    def add_series(self, data, name):
         if isinstance(data, PricingSeries):
-            # Implementation for adding a PricingSeries
-            pass
-        if isinstance(data, AlternativeSeries):
-            # Implementation for adding a Alternative
-            pass
+            self.pricing_feeds[name] = data
+        elif isinstance(data, AlternativeSeries):
+            self.alternative_feeds[name] = data
+        else:
+            raise TypeError(f"Expected PricingSeries or AlternativeSeries, got {type(data).__name__}")
+
+    def add_signal(self, signal, configs):
+        self.signals[signal] = [(i.pricing_series, i.timeframe) for i in configs]
+
+    def __next__():
+        
