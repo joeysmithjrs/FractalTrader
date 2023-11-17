@@ -24,9 +24,10 @@ SOFTWARE.
 import pandas as pd
 import numpy as np
 import sqlite3
+from typing import NamedTuple
 
 
-def _load_data(data_source, table_name=None):
+def _load_data(data_source, table_name=None) -> pd.DataFrame:
     """
     Load data from various sources into a DataFrame.
 
@@ -94,7 +95,7 @@ def _load_data(data_source, table_name=None):
     return df
 
 
-def _ohclv_tick_cols(df):
+def _ohclv_tick_cols(df : pd.DataFrame) -> pd.DataFrame:
     """
     Rename the columns of a DataFrame based on the type of data (OHLCV or TICK).
 
@@ -116,7 +117,7 @@ def _ohclv_tick_cols(df):
     return df
 
 
-def _infer_frequency(datetime_index):
+def _infer_frequency(datetime_index : pd.DatetimeIndex) -> str:
     """
     Deduce the frequency of a datetime index.
 
@@ -148,7 +149,7 @@ def _infer_frequency(datetime_index):
                      "is_tick_data=True upon instantiation.")
 
 
-def _freq_to_timedelta(freq):
+def _freq_to_timedelta(freq : str) -> pd.Timedelta | pd.DateOffset:
     """
     Convert a frequency string to a corresponding timedelta or offset.
 
@@ -223,7 +224,7 @@ class MultiFrame:
         """
         return self
 
-    def _closest_valid_index(self, timeframe):
+    def _closest_valid_index(self, timeframe : str) -> pd.DatetimeIndex:
         """
         Return the closest valid index for a higher timeframe based on the current date.
 
@@ -259,7 +260,7 @@ class MultiFrame:
         else:
             return tf_dates[return_index_position]
 
-    def get(self, column, timeframe, n=0, future=False):
+    def get(self, column : str, timeframe : str, n : int = 0, future : bool = False) -> float | list:
         """
         Get data from the specified column and timeframe.
 
@@ -375,7 +376,7 @@ class PricingSeries(MultiFrame):
         current_index: Index pointer for iteration purposes.
     """
 
-    def __init__(self, data_source, symbol=None, timeframes=None, is_tick_data=False, table_name=None):
+    def __init__(self, data_source, symbol : str = None, timeframes : list = None, is_tick_data : bool = False, table_name : str = None):
         """
         Initialize the PricingSeries object with raw data, symbol, timeframes, etc.
 
@@ -406,7 +407,7 @@ class PricingSeries(MultiFrame):
         # Perform initial data resampling
         self.data = self._resample_data()
 
-    def _resample_data(self):
+    def _resample_data(self) -> dict:
         """
         Resample the raw data to create data for all specified timeframes.
 
@@ -459,7 +460,7 @@ class PricingSeries(MultiFrame):
 
         return resampled
 
-    def new_bar_open(self, timeframe=None):
+    def new_bar_open(self, timeframe : str = None) -> bool:
         """
         Check if a new bar has opened for a given timeframe.
 
@@ -488,11 +489,11 @@ class AlternativeSeries(MultiFrame):
         self.base_index = pricing_series.data[self.base_timeframe].index
         self.data = self._resample_data()
 
-    def _resample_data(self):
+    def _resample_data(self) -> pd.DataFrame:
         resampled = self.raw_data.resample(self.res_tf, closed='left', label='left').agg(self.agg_dict).dropna()
         return resampled.reindex(self.pricing_series_index, method='ffill')
     
-    def is_new_entry(self, timeframe=None):
+    def is_new_entry(self, timeframe : str = None) -> bool:
         if timeframe is None:
             return self.tf_date_change[self.base_timeframe][1] == 0
         return self.tf_date_change[timeframe][1] == 0
@@ -510,7 +511,7 @@ class DataFeed():
     def __iter__(self):
         return self
 
-    def add_series(self, data, name):
+    def add_series(self, data : MultiFrame, name : str):
         if isinstance(data, MultiFrame):
             self.multiframes[name] = data
         else:
