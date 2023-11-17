@@ -24,7 +24,7 @@ SOFTWARE.
 import pandas as pd
 import numpy as np
 import sqlite3
-from typing import NamedTuple
+from dataclasses import dataclass
 
 
 def _load_data(data_source, table_name=None) -> pd.DataFrame:
@@ -187,6 +187,39 @@ def _freq_to_timedelta(freq : str) -> pd.Timedelta | pd.DateOffset:
             raise ValueError(f"The timeframe '{freq}' is not directly convertible to a timedelta.")
 
 
+@dataclass
+class OHCLV:
+    timeframe: str
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: int = None
+    openinterest: int = None
+
+@dataclass
+class TICK:
+    timeframe: str = "TICK"
+    price: float
+    volume: int = None
+    openinterest: int = None
+
+@dataclass
+class MultiRow:
+    symbol: str
+    base: OHCLV | TICK
+    t1: OHCLV = None
+    t2: OHCLV = None
+    t3: OHCLV = None 
+    t4: OHCLV = None
+    t5: OHCLV = None
+    t6: OHCLV = None
+    t7: OHCLV = None
+    t8: OHCLV = None
+    t9: OHCLV = None
+    t10: OHCLV = None
+
+
 class MultiFrame:
     """
     A class that represents multiple timeframes of a given dataset.
@@ -337,30 +370,6 @@ class MultiFrame:
 
         return list(self.data[timeframe].iloc[start_idx:end_idx][column])
     
-    def __next__(self):
-        """
-        Move to the next data point in the series by updating current_date and current_row.
-
-        Raises:
-            StopIteration if the end of the data is reached.
-        """
-        if self.current_index < len(self.data[self.base_timeframe].index) - 1:
-            self.current_index += 1
-            self.current_date = self.data[self.base_timeframe].index[self.current_index]
-
-            # Populate the current row with data from all timeframes and columns
-            self.current_row = {
-                timeframe: {
-                    column: self.get(column, timeframe)
-                    for column in self.data[timeframe].columns
-                }
-                for timeframe in self.timeframes
-            }
-        else:
-            # If there's no more data, end the iteration
-            raise StopIteration
-
-
 
 class PricingSeries(MultiFrame):
     """
@@ -473,6 +482,29 @@ class PricingSeries(MultiFrame):
         if timeframe is None:
             return self.tf_date_change[self.base_timeframe][1] == 0
         return self.tf_date_change[timeframe][1] == 0
+
+    def __next__(self):
+        """
+        Move to the next data point in the series by updating current_date and current_row.
+
+        Raises:
+            StopIteration if the end of the data is reached.
+        """
+        if self.current_index < len(self.data[self.base_timeframe].index) - 1:
+            self.current_index += 1
+            self.current_date = self.data[self.base_timeframe].index[self.current_index]
+
+            # Populate the current row with data from all timeframes and columns
+            self.current_row = {
+                timeframe: {
+                    column: self.get(column, timeframe)
+                    for column in self.data[timeframe].columns
+                }
+                for timeframe in self.timeframes
+            }
+        else:
+            # If there's no more data, end the iteration
+            raise StopIteration
 
 
 class AlternativeSeries(MultiFrame):
