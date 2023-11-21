@@ -206,8 +206,8 @@ class TICK:
 
 @dataclass
 class MultiRow:
-    symbol: str
-    base: OHCLV | TICK
+    dt: str = None
+    base: OHCLV | TICK = None
     t1: OHCLV = None
     t2: OHCLV = None
     t3: OHCLV = None 
@@ -242,7 +242,7 @@ class MultiFrame:
         self.base_delta = None
         self.base_timeframe = None
         self.timeframes = None
-        self.current_row = None
+        self.now = MultiRow()
         self.current_date = None
         self.current_index = -1
         self.tf_date_bounds = {tf : (0, 3) for tf in self.timeframes}
@@ -481,26 +481,34 @@ class PricingSeries(MultiFrame):
         return self.closest_valid_dates[timeframe][1] == 0
 
     def __next__(self):
-        """
-        Move to the next data point in the series by updating current_date and current_row.
-
-        Raises:
-            StopIteration if the end of the data is reached.
-        """
         if self.current_index < len(self.data[self.base_timeframe].index) - 1:
             self.current_index += 1
             self.current_date = self.data[self.base_timeframe].index[self.current_index]
             self._update_valid_dates()
-            # Populate the current row with data from all timeframes and columns
-            self.current_row = {
-                timeframe: {
-                    column: self.get(column, timeframe)
-                    for column in self.data[timeframe].columns
-                }
-                for timeframe in self.timeframes
-            }
+
+            current_multi_row = MultiRow(dt=self.current_date)
+
+            for idx, timeframe in enumerate(self.timeframes):
+
+                if timeframe == "TICK":
+                    timeframe_instance = TICK(price=self.get('price', timeframe=timeframe), 
+                                              volume=self.get('volume', timeframe=timeframe) if 'volume' in self.data[timeframe].columns else None,
+                                              openinterest=self.get('openinterest', timeframe=timeframe) if 'openinterest' in self.data[timeframe].columns else None)
+                else:
+                    timeframe_instance = OHCLV(timeframe=timeframe,
+                                               open=self.get('open', timeframe),
+                                               high=self.get('high', timeframe),
+                                               low=self.get('low', timeframe),
+                                               close=self.get('close', timeframe),
+                                               volume=self.get('volume', timeframe) if 'volume' in self.data[timeframe].columns else None,
+                                               openinterest=self.get('openinterest', timeframe) if 'openinterest' in self.data[timeframe].columns else None)
+                if idx == 0:
+                    current_multi_row.base = timeframe_instance
+                else:
+                    setattr(current_multi_row, f't{min(idx, 10)}', timeframe_instance)
+
+            self.now = current_multi_row
         else:
-            # If there's no more data, end the iteration
             raise StopIteration
 
 
