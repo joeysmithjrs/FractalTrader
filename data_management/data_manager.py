@@ -246,7 +246,7 @@ class MultiFrame:
         self.current_date = None
         self.current_index = -1
         self.tf_date_bounds = {tf : (0, 3) for tf in self.timeframes}
-        self.tf_date_change = {tf : (None, -1) for tf in self.timeframes}
+        self.closest_valid_dates = {tf : (None, -1) for tf in self.timeframes}
         
     def __iter__(self):
         """
@@ -256,6 +256,15 @@ class MultiFrame:
             Self.
         """
         return self
+    
+    def _update_valid_dates(self):
+        temp = {tf : (self._closest_valid_index(tf), 0) for tf in self.timeframes}
+        for timeframe in self.timeframes[1:]:
+            if temp[timeframe][0] != self.closest_valid_dates[timeframe][0]:
+                self.closest_valid_dates[timeframe] = temp[timeframe]
+            else:
+                self.closest_valid_dates[timeframe][1] += 1
+                
 
     def _closest_valid_index(self, timeframe : str) -> pd.DatetimeIndex:
         """
@@ -279,7 +288,8 @@ class MultiFrame:
                     next_index_date = tf_dates[closest_index_position + 1]
                     if (next_index_date - self.current_date) == self.base_delta:
                         return_index_position = closest_index_position
-            return_index_position = closest_index_position - 1
+            else:
+                return_index_position = closest_index_position - 1
         else:
             # Logic for when closest_index_date is greater than the current_date
             if (closest_index_date - self.current_date) == self.base_delta:
@@ -287,6 +297,8 @@ class MultiFrame:
             else:
                 return_index_position = closest_index_position - 2
 
+        self.tf_date_bounds[timeframe][0] = max(return_index_position, 0)
+        self.tf_date_bounds[timeframe][1] = min(return_index_position + 1, len(self.data[timeframe].index)-1)
         # Return the found index or None if it's out of bounds
         if return_index_position < 0:
             return None
@@ -317,17 +329,9 @@ class MultiFrame:
             if timeframe == self.base_timeframe:
                 return self.data[timeframe].iloc[self.current_index][column]
             else:
-                closest_valid_date = self._closest_valid_index(timeframe)
-                if closest_valid_date is None:
+                if self.closest_valid_dates[timeframe][0] is None:
                     return None
-                if closest_valid_date != self.tf_date_change[timeframe]:
-                    self.tf_date_bounds[timeframe][0] += 1
-                    self.tf_date_bounds[timeframe][1] += 1
-                    self.tf_date_change[timeframe][0] = closest_valid_date
-                    self.tf_date_change[timeframe][1] = 0
-                else:
-                    self.tf_date_change[timeframe][1] += 1
-                return self.data[timeframe].loc[closest_valid_date][column]
+                return self.data[timeframe].loc[self.closest_valid_dates[timeframe][0]][column]
 
         # Handle retrieval from the base timeframe
         if timeframe == self.base_timeframe:
@@ -345,19 +349,12 @@ class MultiFrame:
             return list(self.data[timeframe].iloc[target_idx:end_idx][column])
 
         # Handle retrieval from higher timeframes
-        closest_valid_date = self._closest_valid_index(timeframe)
-        if closest_valid_date is None:
+        if self.closest_valid_dates[timeframe][0] is None:
             return None
-        if closest_valid_date != self.tf_date_change[timeframe]:
-            self.tf_date_bounds[timeframe][0] += 1
-            self.tf_date_bounds[timeframe][1] += 1
-            self.tf_date_change[timeframe][0] = closest_valid_date
-        else:
-            self.tf_date_change[timeframe][1] += 1
         if future:
-            valid_dates = self.data[timeframe].index[self.data[timeframe].index >= closest_valid_date]
+            valid_dates = self.data[timeframe].index[self.data[timeframe].index >= self.closest_valid_dates[timeframe][0]]
         else:
-            valid_dates = self.data[timeframe].index[self.data[timeframe].index <= closest_valid_date]
+            valid_dates = self.data[timeframe].index[self.data[timeframe].index <= self.closest_valid_dates[timeframe][0]]
 
         # Find the start and end indices to retrieve data
         end_idx = valid_dates.get_loc(valid_dates[-1])
@@ -480,8 +477,8 @@ class PricingSeries(MultiFrame):
             Boolean indicating if a new bar has opened.
         """
         if timeframe is None:
-            return self.tf_date_change[self.base_timeframe][1] == 0
-        return self.tf_date_change[timeframe][1] == 0
+            return self.closest_valid_dates[self.base_timeframe][1] == 0
+        return self.closest_valid_dates[timeframe][1] == 0
 
     def __next__(self):
         """
@@ -493,7 +490,7 @@ class PricingSeries(MultiFrame):
         if self.current_index < len(self.data[self.base_timeframe].index) - 1:
             self.current_index += 1
             self.current_date = self.data[self.base_timeframe].index[self.current_index]
-
+            self._update_valid_dates()
             # Populate the current row with data from all timeframes and columns
             self.current_row = {
                 timeframe: {
