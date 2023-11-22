@@ -206,18 +206,19 @@ class TICK:
 
 @dataclass
 class MultiRow:
-    dt: str = None
+    dt: str 
     base: OHCLV | TICK = None
-    t1: OHCLV = None
-    t2: OHCLV = None
-    t3: OHCLV = None 
-    t4: OHCLV = None
-    t5: OHCLV = None
-    t6: OHCLV = None
-    t7: OHCLV = None
-    t8: OHCLV = None
-    t9: OHCLV = None
-    t10: OHCLV = None
+
+    def __post_init__(self):
+        for i in range(1, 101):
+            setattr(self, f't{i}', None)
+
+    def __init__(self, dt, **kwargs):
+        self.dt = dt
+        super().__init__()
+        for key, value in kwargs.items():
+            if key.startswith('t') and key[1:].isdigit() and int(key[1:]) <= 100:
+                setattr(self, key, value)
 
 
 class MultiFrame:
@@ -247,7 +248,7 @@ class MultiFrame:
         self.current_index = -1
         self.tf_date_bounds = {tf : (0, 3) for tf in self.timeframes}
         self.closest_valid_dates = {tf : (None, -1) for tf in self.timeframes}
-        
+    
     def __iter__(self):
         """
         Initialize the iterator.
@@ -257,6 +258,13 @@ class MultiFrame:
         """
         return self
     
+    def _sort_timeframes(self, timeframes : list) -> list:
+        timeframes_td = [_freq_to_timedelta(tf) for tf in timeframes or []]
+        timeframes = [(self.base_timeframe, self.base_delta)] + [(tf, tf_td) for tf, tf_td in zip(timeframes or [], timeframes_td) if
+                                                                tf_td >= self.base_delta and tf != self.base_timeframe]
+        sorted_timeframes = sorted(timeframes, key=lambda x: x[1])
+        return [tf[0] for tf in sorted_timeframes]
+ 
     def _update_valid_dates(self):
         temp = {tf : (self._closest_valid_index(tf), 0) for tf in self.timeframes}
         for timeframe in self.timeframes[1:]:
@@ -401,13 +409,7 @@ class PricingSeries(MultiFrame):
         self.is_tick_data = is_tick_data
         self.base_timeframe = _infer_frequency(self.raw_data.index) if not self.is_tick_data else "TICK"
         self.base_delta = _freq_to_timedelta(self.base_timeframe)
-
-        # Convert all timeframes to time deltas and filter out invalid ones
-        timeframes_td = [_freq_to_timedelta(tf) for tf in timeframes or []]
-        self.timeframes = [self.base_timeframe] + [tf for tf, tf_td in zip(timeframes or [], timeframes_td) if
-                                                   tf_td >= self.base_delta and tf != self.base_timeframe]
-
-        # Initialize a dictionary to track how many bars since the last new data point for each timeframe
+        self.timeframes = self._sort_timeframes(timeframes)
         self.bars_since_new = {tf: 0 for tf in self.timeframes}
 
         # Perform initial data resampling
@@ -505,7 +507,7 @@ class PricingSeries(MultiFrame):
                 if idx == 0:
                     current_multi_row.base = timeframe_instance
                 else:
-                    setattr(current_multi_row, f't{min(idx, 10)}', timeframe_instance)
+                    setattr(current_multi_row, f't{idx}', timeframe_instance)
 
             self.now = current_multi_row
         else:
