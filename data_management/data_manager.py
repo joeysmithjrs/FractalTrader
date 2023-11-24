@@ -254,7 +254,7 @@ class MultiFrame:
         self.now = MultiRow()
         self.current_date = None
         self.current_index = -1
-        self.tf_date_bounds = {tf : (0, 3) for tf in self.timeframes}
+        self.tf_date_bounds = {tf : (0, 2) for tf in self.timeframes}
         self.closest_valid_dates = {tf : (None, -1) for tf in self.timeframes}
     
     def __iter__(self):
@@ -412,15 +412,12 @@ class PricingSeries(MultiFrame):
         super().__init__()  # Call the initialization method of the parent class (MultiFrame)
 
         # Load data and infer important characteristics
-        self.raw_data = _ohclv_tick_cols(_load_data(data_source, table_name))
         self.symbol = symbol
         self.is_tick_data = is_tick_data
+        self.raw_data = _ohclv_tick_cols(_load_data(data_source, table_name))
         self.base_timeframe = _infer_frequency(self.raw_data.index) if not self.is_tick_data else "TICK"
         self.base_delta = _freq_to_timedelta(self.base_timeframe)
         self.timeframes = self._sort_timeframes(timeframes)
-        self.bars_since_new = {tf: 0 for tf in self.timeframes}
-
-        # Perform initial data resampling
         self.data = self._resample_data()
 
     def _resample_data(self) -> dict:
@@ -434,7 +431,7 @@ class PricingSeries(MultiFrame):
 
         for tf in self.timeframes:
             if tf == self.base_timeframe:
-                resampled[tf] = self.raw_data.copy()
+                resampled[tf] = self.raw_data.copy().dropna()
                 continue
             if self.is_tick_data:
                 # For tick data, resampling requires different logic
