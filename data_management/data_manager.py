@@ -207,27 +207,18 @@ class TICK:
 @dataclass
 class MultiRow:
     dt: str
-    base: OHCLV | TICK = None 
-    timeframe_count: int = 0 
-
-    def __post_init__(self):
-        for i in range(1, 101):
-            self.__setattr__(self, f't{i}', None)
-
-    def __init__(self, dt, **kwargs):
-        self.dt = dt
-        super().__init__()
-        for key, value in kwargs.items():
-            self.__setattr__(key, value)
+    base: OHCLV | TICK = None
+    timeframe_count: int = 0
 
     def __setattr__(self, key, value):
         if key.startswith('t') and key[1:].isdigit() and int(key[1:]) <= 100:
+            if not isinstance(value, OHCLV) and value is not None:
+                raise TypeError(f"{key} must be of type OHCLV")
             if value is not None and getattr(self, key, None) is None:
                 self.timeframe_count += 1
             elif value is None and getattr(self, key, None) is not None:
                 self.timeframe_count -= 1
-        object.__setattr__(self, key, value)
-
+        super().__setattr__(key, value)
 
 class MultiFrame:
     """
