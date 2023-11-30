@@ -204,22 +204,62 @@ class TICK:
     volume: int = None
     openinterest: int = None
 
+class ChronoStruct:
+    now: OHCLV | TICK = None
+    current_idx: str = None
+    frame: tuple = None
+
+    def __init__(self, data: pd.DataFrame):
+        self.data = data
+        self.frame = (self.data.index[0], self.data.index[-1])
+
+    def get(self, column : str, n : int = 0, future : bool = False) -> float | int | list:
+
+        if column not in self.data.columns:
+            raise ValueError(f"Column {column} not in loaded data!")
+
+        if n == 0:
+            return self.data.loc[self.current_idx][column]
+
+        if future:
+            target_idx = self.current_idx
+            end_idx = target_idx + n
+        else:
+            target_idx = self.current_idx - n
+            end_idx = self.current_idx + 1
+
+        target_idx = max(0, target_idx)
+        end_idx = min(len(self.data.index), end_idx)
+
+        return list(self.data.iloc[target_idx:end_idx][column])
+    
+    def reindex(self, frame: tuple):
+
+        if not isinstance(frame, tuple) or len(frame) != 2:
+            raise ValueError("Frame must be a tuple with two elements.")
+        
+        if frame[0] < self.frame[0] or frame[1] > self.frame[1]:
+            raise ValueError("Given frame is outside of the current frame.")
+        
+        self.data = self.data.loc[frame[0]:frame[1]]
+        self.frame = frame
+
 @dataclass
-class MultiRow:
-    dt: str
-    base: OHCLV | TICK = None
+class MultiFrame:
+    base: ChronoStruct = None
     timeframe_count: int = 0
 
     def __setattr__(self, key, value):
         if key.startswith('t') and key[1:].isdigit() and int(key[1:]) <= 100:
-            if not isinstance(value, OHCLV) and value is not None:
-                raise TypeError(f"{key} must be of type OHCLV")
+            if not isinstance(value, ChronoStruct) and value is not None:
+                raise TypeError(f"{key} must be of type ChronoStruct")
             if value is not None and getattr(self, key, None) is None:
                 self.timeframe_count += 1
             elif value is None and getattr(self, key, None) is not None:
                 self.timeframe_count -= 1
         super().__setattr__(key, value)
 
+ 
 class MultiFrame:
     """
     A class that represents multiple timeframes of a given dataset.
@@ -248,30 +288,6 @@ class MultiFrame:
         self.tf_date_bounds = {tf : (0, 2) for tf in self.timeframes}
         self.closest_valid_dates = {tf : (None, -1) for tf in self.timeframes}
     
-    def __iter__(self):
-        """
-        Initialize the iterator.
-
-        Returns:
-            Self.
-        """
-        return self
-    
-    def _sort_timeframes(self, timeframes : list) -> list:
-        timeframes_td = [_freq_to_timedelta(tf) for tf in timeframes or []]
-        timeframes = [(self.base_timeframe, self.base_delta)] + [(tf, tf_td) for tf, tf_td in zip(timeframes or [], timeframes_td) if
-                                                                tf_td >= self.base_delta and tf != self.base_timeframe]
-        sorted_timeframes = sorted(timeframes, key=lambda x: x[1])
-        return [tf[0] for tf in sorted_timeframes]
- 
-    def _update_valid_dates(self):
-        temp = {tf : (self._closest_valid_index(tf), 0) for tf in self.timeframes}
-        for timeframe in self.timeframes[1:]:
-            if temp[timeframe][0] != self.closest_valid_dates[timeframe][0]:
-                self.closest_valid_dates[timeframe] = temp[timeframe]
-            else:
-                self.closest_valid_dates[timeframe][1] += 1
-                
 
     def _closest_valid_index(self, timeframe : str) -> pd.DatetimeIndex:
         """
@@ -410,6 +426,24 @@ class PricingSeries(MultiFrame):
         self.base_delta = _freq_to_timedelta(self.base_timeframe)
         self.timeframes = self._sort_timeframes(timeframes)
         self.data = self._resample_data()
+
+    def __iter__(self):
+        return self
+
+    def _sort_timeframes(self, timeframes : list) -> list:
+        timeframes_td = [_freq_to_timedelta(tf) for tf in timeframes or []]
+        timeframes = [(self.base_timeframe, self.base_delta)] + [(tf, tf_td) for tf, tf_td in zip(timeframes or [], timeframes_td) if
+                                                                tf_td >= self.base_delta and tf != self.base_timeframe]
+        sorted_timeframes = sorted(timeframes, key=lambda x: x[1])
+        return [tf[0] for tf in sorted_timeframes]
+ 
+    def _update_valid_dates(self):
+        temp = {tf : (self._closest_valid_index(tf), 0) for tf in self.timeframes}
+        for timeframe in self.timeframes[1:]:
+            if temp[timeframe][0] != self.closest_valid_dates[timeframe][0]:
+                self.closest_valid_dates[timeframe] = temp[timeframe]
+            else:
+                self.closest_valid_dates[timeframe][1] += 1
 
     def _resample_data(self) -> dict:
         """
