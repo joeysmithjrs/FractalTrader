@@ -208,10 +208,13 @@ class ChronoStruct:
     now: OHCLV | TICK = None
     current_idx: str = None
     frame: tuple = None
+    idx_bounds = (0, 2)
 
-    def __init__(self, data: pd.DataFrame):
+    def __init__(self, data: pd.DataFrame, base_delta: pd.Timedelta | pd.DateOffset):
         self.data = data
         self.frame = (self.data.index[0], self.data.index[-1])
+        self.current_date = self.data.index[0]
+        self.base_delta = base_delta
 
     def get(self, column : str, n : int = 0, future : bool = False) -> float | int | list:
 
@@ -232,6 +235,37 @@ class ChronoStruct:
         end_idx = min(len(self.data.index), end_idx)
 
         return list(self.data.iloc[target_idx:end_idx][column])
+
+    def _closest_valid_index(self) -> pd.DatetimeIndex:
+        tf_dates = self.data.index[self.idx_bounds[0], self.idx_bounds[1]]
+        # Find the closest date index in the timeframe's dates to the current date
+        closest_index_position = tf_dates.get_indexer([self.current_date], method='nearest')[0]
+        closest_index_date = tf_dates[closest_index_position]
+
+        # Check the proximity of the closest date to the current date
+        if closest_index_date <= self.current_date:
+            if (self.current_date - closest_index_date) == self.base_delta:
+                if closest_index_position < len(tf_dates) - 1:
+                    next_index_date = tf_dates[closest_index_position + 1]
+                    if (next_index_date - self.current_date) == self.base_delta:
+                        return_index_position = closest_index_position
+            else:
+                return_index_position = closest_index_position - 1
+        else:
+            # Logic for when closest_index_date is greater than the current_date
+            if (closest_index_date - self.current_date) == self.base_delta:
+                return_index_position = closest_index_position - 1
+            else:
+                return_index_position = closest_index_position - 2
+
+        self.idx_bounds[0] = max(return_index_position, 0)
+        self.idx_bounds[1] = min(return_index_position + 1, len(self.data.index)-1)
+        # Return the found index or None if it's out of bounds
+        if return_index_position < 0:
+            return None
+        else:
+            return tf_dates[return_index_position]
+
     
     def reindex(self, frame: tuple):
 
@@ -259,166 +293,9 @@ class MultiFrame:
                 self.timeframe_count -= 1
         super().__setattr__(key, value)
 
- 
-class MultiFrame:
-    """
-    A class that represents multiple timeframes of a given dataset.
-
-    Attributes:
-        data: Dictionary holding data for different timeframes.
-        base_delta: The smallest time difference between data points.
-        base_timeframe: The smallest timeframe from which data is derived.
-        timeframes: List of all timeframes included in the data.
-        current_row: Current row of data.
-        current_date: Current date in consideration.
-        current_index: Index pointer for iteration purposes.
-    """
-
-    def __init__(self):
-        """
-        Initialize the MultiFrame with default values.
-        """
-        self.data = {}
-        self.base_delta = None
-        self.base_timeframe = None
-        self.timeframes = None
-        self.now = MultiRow()
-        self.current_date = None
-        self.current_index = -1
-        self.tf_date_bounds = {tf : (0, 2) for tf in self.timeframes}
-        self.closest_valid_dates = {tf : (None, -1) for tf in self.timeframes}
-    
-
-    def _closest_valid_index(self, timeframe : str) -> pd.DatetimeIndex:
-        """
-        Return the closest valid index for a higher timeframe based on the current date.
-
-        Args:
-            timeframe: The higher timeframe to consider.
-
-        Returns:
-            Closest valid datetime index for the given timeframe.
-        """
-        tf_dates = self.data[timeframe].index[self.tf_date_bounds[timeframe][0], self.tf_date_bounds[timeframe][1]]
-        # Find the closest date index in the timeframe's dates to the current date
-        closest_index_position = tf_dates.get_indexer([self.current_date], method='nearest')[0]
-        closest_index_date = tf_dates[closest_index_position]
-
-        # Check the proximity of the closest date to the current date
-        if closest_index_date <= self.current_date:
-            if (self.current_date - closest_index_date) == self.base_delta:
-                if closest_index_position < len(tf_dates) - 1:
-                    next_index_date = tf_dates[closest_index_position + 1]
-                    if (next_index_date - self.current_date) == self.base_delta:
-                        return_index_position = closest_index_position
-            else:
-                return_index_position = closest_index_position - 1
-        else:
-            # Logic for when closest_index_date is greater than the current_date
-            if (closest_index_date - self.current_date) == self.base_delta:
-                return_index_position = closest_index_position - 1
-            else:
-                return_index_position = closest_index_position - 2
-
-        self.tf_date_bounds[timeframe][0] = max(return_index_position, 0)
-        self.tf_date_bounds[timeframe][1] = min(return_index_position + 1, len(self.data[timeframe].index)-1)
-        # Return the found index or None if it's out of bounds
-        if return_index_position < 0:
-            return None
-        else:
-            return tf_dates[return_index_position]
-
-    def get(self, column : str, timeframe : str, n : int = 0, future : bool = False) -> float | list:
-        """
-        Get data from the specified column and timeframe.
-
-        Args:
-            column: Column name.
-            timeframe: The timeframe to retrieve data from.
-            n: Number of periods to retrieve.
-            future: If future data is to be considered.
-
-        Returns:
-            Value or list of values from the specified column and timeframe.
-        """
-        # Validate inputs
-        if timeframe not in self.timeframes:
-            raise ValueError(f"Timeframe {timeframe} not in loaded data!")
-        if column not in self.data[timeframe].columns:
-            raise ValueError(f"Column {column} not in loaded data for timeframe {timeframe}!")
-
-        # If no periods are specified, return the current value
-        if n == 0:
-            if timeframe == self.base_timeframe:
-                return self.data[timeframe].iloc[self.current_index][column]
-            else:
-                if self.closest_valid_dates[timeframe][0] is None:
-                    return None
-                return self.data[timeframe].loc[self.closest_valid_dates[timeframe][0]][column]
-
-        # Handle retrieval from the base timeframe
-        if timeframe == self.base_timeframe:
-            if future:
-                target_idx = self.current_index
-                end_idx = target_idx + n
-            else:
-                target_idx = self.current_index - n
-                end_idx = self.current_index + 1
-
-            # Ensure index boundaries are not exceeded
-            target_idx = max(0, target_idx)
-            end_idx = min(len(self.data[timeframe]), end_idx)
-
-            return list(self.data[timeframe].iloc[target_idx:end_idx][column])
-
-        # Handle retrieval from higher timeframes
-        if self.closest_valid_dates[timeframe][0] is None:
-            return None
-        if future:
-            valid_dates = self.data[timeframe].index[self.data[timeframe].index >= self.closest_valid_dates[timeframe][0]]
-        else:
-            valid_dates = self.data[timeframe].index[self.data[timeframe].index <= self.closest_valid_dates[timeframe][0]]
-
-        # Find the start and end indices to retrieve data
-        end_idx = valid_dates.get_loc(valid_dates[-1])
-        start_idx = end_idx - n + 1 if not future else end_idx
-        end_idx = start_idx + n
-
-        # Ensure index boundaries are not exceeded
-        start_idx = max(0, start_idx)
-        end_idx = min(len(self.data[timeframe]), end_idx)
-
-        return list(self.data[timeframe].iloc[start_idx:end_idx][column])
-    
-
-class PricingSeries(MultiFrame):
-    """
-    A class that represents a series of pricing data for one or multiple timeframes.
-
-    Attributes:
-        raw_data: The raw pricing data.
-        symbol: Symbol of the asset.
-        is_tick_data: Boolean indicating if data is tick data.
-        base_timeframe: The inferred base timeframe from the raw data.
-        timeframes: List of all timeframes used.
-        data: Resampled data for different timeframes.
-        current_index: Index pointer for iteration purposes.
-    """
+class PricingSeries():
 
     def __init__(self, data_source, symbol : str = None, timeframes : list = None, is_tick_data : bool = False, table_name : str = None):
-        """
-        Initialize the PricingSeries object with raw data, symbol, timeframes, etc.
-
-        Args:
-            data_source: Data source can be path to file, DataFrame, numpy array or list.
-            symbol: Symbol of the asset.
-            timeframes: List of timeframes.
-            is_tick_data: If the provided data is tick data.
-            table_name: Name of the table in case data_source is a database.
-        """
-        super().__init__()  # Call the initialization method of the parent class (MultiFrame)
-
-        # Load data and infer important characteristics
         self.symbol = symbol
         self.is_tick_data = is_tick_data
         self.raw_data = _ohclv_tick_cols(_load_data(data_source, table_name))
@@ -450,13 +327,14 @@ class PricingSeries(MultiFrame):
         Resample the raw data to create data for all specified timeframes.
 
         Returns:
-            Dictionary with keys as timeframes and values as respective resampled data.
+            Multiframe of Chronostructs
         """
-        resampled = {}
+        resampled = MultiFrame()
 
-        for tf in self.timeframes:
+        for i, tf in enumerate(self.timeframes):
             if tf == self.base_timeframe:
-                resampled[tf] = self.raw_data.copy().dropna()
+                resampled.base = ChronoStruct(data=self.raw_data.copy().dropna(), 
+                                              base_delta=self.base_delta)
                 continue
             if self.is_tick_data:
                 # For tick data, resampling requires different logic
@@ -485,7 +363,7 @@ class PricingSeries(MultiFrame):
                     column_mapping[('open_interest', 'last')] = 'open_interest'
 
                 temp_resampled.columns = pd.MultiIndex.from_tuples(temp_resampled.columns).map(column_mapping)
-                resampled[tf] = temp_resampled
+                res_df = temp_resampled
             else:
                 # For standard data, resampling follows a standard logic
                 agg_dict = {'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last'}
@@ -494,8 +372,8 @@ class PricingSeries(MultiFrame):
                 if 'open_interest' in self.raw_data.columns:
                     agg_dict['open_interest'] = 'last'
 
-                resampled[tf] = self.raw_data.resample(tf, closed='left').agg(agg_dict).dropna()
-
+                res_df = self.raw_data.resample(tf, closed='left').agg(agg_dict).dropna()
+            resampled.__setattr__('t{i}', ChronoStruct(data=res_df,base_delta=self.base_delta))
         return resampled
 
     def new_bar_open(self, timeframe : str = None) -> bool:
