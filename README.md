@@ -4,6 +4,8 @@ Welcome to **FractalTrader**, an innovative open-source framework designed for a
 
 FractalTrader is developed to fill gaps in existing open-source trading frameworks, particularly in handling varied time scales and extensive asset portfolios without the need for complex workarounds. 
 
+FractalTrader embraces a distinctive methodology by viewing financial time series as dynamic systems with fractal geometric traits. To complement this approach, it offers a comprehensive, custom toolkit designed to assist in the development of advanced technical indicators and strategies. Furthermore, FractalTrader features native support for conformal prediction, integrating with the MAPIE library to provide model-agnostic and distribution-agnostic prediction intervals.
+
 ## Key Features
 
 - **Unified Strategy Development**: Build strategies that are seamlessly applicable for both live trading and backtesting, ensuring consistency and efficiency in your trading approach.
