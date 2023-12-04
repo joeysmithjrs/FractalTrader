@@ -213,6 +213,7 @@ class ChronoStruct:
     def __init__(self, data: pd.DataFrame, base_delta: pd.Timedelta | pd.DateOffset):
         self.data = data
         self.frame = (self.data.index[0], self.data.index[-1])
+        self.current_valid_date = self.data.index[0]
         self.current_date = self.data.index[0]
         self.base_delta = base_delta
 
@@ -262,10 +263,13 @@ class ChronoStruct:
         self.idx_bounds[1] = min(return_index_position + 1, len(self.data.index)-1)
         # Return the found index or None if it's out of bounds
         if return_index_position < 0:
-            return None
+            self.current_idx = None
         else:
-            return tf_dates[return_index_position]
+            self.current_idx = return_index_position
+            self.current_valid_date = tf_dates[return_index_position]
 
+    def new_bar_open(self) -> bool:
+        return self.closest_valid_dates
     
     def reindex(self, frame: tuple):
 
@@ -315,12 +319,9 @@ class PricingSeries():
         return [tf[0] for tf in sorted_timeframes]
  
     def _update_valid_dates(self):
-        temp = {tf : (self._closest_valid_index(tf), 0) for tf in self.timeframes}
-        for timeframe in self.timeframes[1:]:
-            if temp[timeframe][0] != self.closest_valid_dates[timeframe][0]:
-                self.closest_valid_dates[timeframe] = temp[timeframe]
-            else:
-                self.closest_valid_dates[timeframe][1] += 1
+        self.data.base._closest_valid_index()
+        for i in self.data.timeframe_count:
+            self.data.getattr("t%s" % i+1)._closest_valid_index()
 
     def _resample_data(self) -> dict:
         """
@@ -376,24 +377,10 @@ class PricingSeries():
             resampled.__setattr__('t{i}', ChronoStruct(data=res_df,base_delta=self.base_delta))
         return resampled
 
-    def new_bar_open(self, timeframe : str = None) -> bool:
-        """
-        Check if a new bar has opened for a given timeframe.
-
-        Args:
-            timeframe: The timeframe in question.
-
-        Returns:
-            Boolean indicating if a new bar has opened.
-        """
-        if timeframe is None:
-            return self.closest_valid_dates[self.base_timeframe][1] == 0
-        return self.closest_valid_dates[timeframe][1] == 0
-
     def __next__(self):
         if self.current_index < len(self.data[self.base_timeframe].index) - 1:
             self.current_index += 1
-            self.current_date = self.data[self.base_timeframe].index[self.current_index]
+            self.current_date = self.data.base.current_date
             self._update_valid_dates()
 
             current_multi_row = MultiRow(dt=self.current_date)
