@@ -211,19 +211,22 @@ class ChronoStruct:
     idx_bounds = (0, 2)
 
     def __init__(self, data: pd.DataFrame, base_delta: pd.Timedelta | pd.DateOffset):
-        self.data = data
-        self.frame = (self.data.index[0], self.data.index[-1])
-        self.current_valid_date = self.data.index[0]
-        self.current_date = self.data.index[0]
+        self.dataframe = data
+        self.frame = (self.dataframe.index[0], self.dataframe.index[-1])
+        self.current_valid_date = self.dataframe.index[0]
+        self.current_date = self.dataframe.index[0]
         self.base_delta = base_delta
+    
+    def __iter__(self):
+        return self
 
     def get(self, column : str, n : int = 0, future : bool = False) -> float | int | list:
 
-        if column not in self.data.columns:
+        if column not in self.dataframe.columns:
             raise ValueError(f"Column {column} not in loaded data!")
 
         if n == 0:
-            return self.data.loc[self.current_idx][column]
+            return self.dataframe.loc[self.current_idx][column]
 
         if future:
             target_idx = self.current_idx
@@ -233,12 +236,12 @@ class ChronoStruct:
             end_idx = self.current_idx + 1
 
         target_idx = max(0, target_idx)
-        end_idx = min(len(self.data.index), end_idx)
+        end_idx = min(len(self.dataframe.index), end_idx)
 
-        return list(self.data.iloc[target_idx:end_idx][column])
+        return list(self.dataframe.iloc[target_idx:end_idx][column])
 
     def _closest_valid_index(self) -> pd.DatetimeIndex:
-        tf_dates = self.data.index[self.idx_bounds[0], self.idx_bounds[1]]
+        tf_dates = self.dataframe.index[self.idx_bounds[0], self.idx_bounds[1]]
         # Find the closest date index in the timeframe's dates to the current date
         closest_index_position = tf_dates.get_indexer([self.current_date], method='nearest')[0]
         closest_index_date = tf_dates[closest_index_position]
@@ -260,7 +263,7 @@ class ChronoStruct:
                 return_index_position = closest_index_position - 2
 
         self.idx_bounds[0] = max(return_index_position, 0)
-        self.idx_bounds[1] = min(return_index_position + 1, len(self.data.index)-1)
+        self.idx_bounds[1] = min(return_index_position + 1, len(self.dataframe.index)-1)
         # Return the found index or None if it's out of bounds
         if return_index_position < 0:
             self.current_idx = None
@@ -279,9 +282,14 @@ class ChronoStruct:
         if frame[0] < self.frame[0] or frame[1] > self.frame[1]:
             raise ValueError("Given frame is outside of the current frame.")
         
-        self.data = self.data.loc[frame[0]:frame[1]]
+        self.dataframe = self.dataframe.loc[frame[0]:frame[1]]
         self.frame = frame
 
+    def __next__(self):
+        if self.current_idx < len(self.dataframe.index) - 1:
+            pass
+        else:
+            raise StopIteration
 @dataclass
 class MultiFrame:
     base: ChronoStruct = None
@@ -374,7 +382,7 @@ class PricingSeries():
                     agg_dict['open_interest'] = 'last'
 
                 res_df = self.raw_data.resample(tf, closed='left').agg(agg_dict).dropna()
-            resampled.__setattr__('t{i}', ChronoStruct(data=res_df,base_delta=self.base_delta))
+            resampled.__setattr__('t%s' % i, ChronoStruct(data=res_df,base_delta=self.base_delta))
         return resampled
 
     def __next__(self):
