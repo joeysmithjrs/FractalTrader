@@ -18,7 +18,7 @@ FractalTrader embraces a distinctive methodology by viewing financial time serie
 
 ## Getting Started
 
-Further details will be made available upon completion, I work on this project in my limited free time but I expect a completed version by March-April, 2024.
+Further details will be made available upon completion, I work on this project in my limited free time but I expect a completed version by FALL, 2024.
 
 If you're interested in contributing please email me at joeysmithjrs@gmail.com
 
